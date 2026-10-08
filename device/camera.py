@@ -154,6 +154,8 @@ def worker(config, stop):
             delay = 5
         except Exception as error:
             # Do not log auth responses, passwords, or bearer tokens.
+            if isinstance(error, urllib.error.HTTPError) and error.code == 401:
+                cloud.expires = 0
             LOG.warning("Upload deferred (%s); queue retained", type(error).__name__)
             delay = min(delay * 2, 300)
         stop.wait(delay + random.uniform(0, 2))
@@ -169,6 +171,8 @@ def main():
     parser.add_argument("--upload-only", action="store_true", help="Drain pending captures and exit")
     parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
+    if args.offline and args.upload_only:
+        parser.error("--offline cannot be combined with --upload-only")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     os.umask(0o077)
     config = json.loads(Path(args.config).read_text())

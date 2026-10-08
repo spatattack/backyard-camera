@@ -107,3 +107,7 @@ sudo -u backyard python3 /opt/backyard-camera/device/camera.py --config /etc/bac
 `get_throttled=0x0` indicates no current/historical throttling flags since boot. Upload failures retain queued files; repeated capture errors mean inspect the camera and service permissions. Stop with `sudo systemctl stop backyard-camera` before manually capturing into the same queue.
 
 References: [Camera software](https://www.raspberrypi.com/documentation/computers/camera_software.html), [Camera hardware](https://www.raspberrypi.com/documentation/accessories/camera.html), [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
+
+## Mac certificate troubleshooting
+
+If a python.org Python installation reports `CERTIFICATE_VERIFY_FAILED`, use its supplied **Install Certificates.command**, or a correctly configured Homebrew Python (on this Mac, `/opt/homebrew/bin/python3`). Do not disable certificate verification. The uploader requires HTTPS; its first Mac test passed using Homebrew Python after the python.org interpreter's certificate store failed.

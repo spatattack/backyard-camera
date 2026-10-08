@@ -17,8 +17,8 @@
 
 ## Pending verification
 
-- Device Auth account/password configuration and first live mock upload.
-- Vercel Git import/deploy. Connector creation returned 403 for this account; dashboard access works, but its optional 2FA prompt requires the user to handle it after automatic approval review blocked dismissal.
+- Device Auth account configured and registered; first live mock JPEG uploaded, metadata inserted, public download SHA-256 verified and queue drained to zero.
+- Vercel Git import is building via the dashboard. The user handled its 2FA prompt; connector creation had returned 403.
 - Actual Pi camera capture, Wi-Fi recovery, systemd permissions, power and enclosure checks require hardware access.
 
 No admin/service-role key was obtained or placed on the Pi/site. `device/config.json` and `.env.local` are local ignored files. London Drift was not changed. No AI ranking or automatic cloud deletion was added.
