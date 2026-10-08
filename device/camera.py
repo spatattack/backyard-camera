@@ -31,19 +31,23 @@ class Queue:
         self.db.execute("pragma journal_mode=WAL")
         self.db.execute("pragma synchronous=FULL")
         self.db.execute("create table if not exists captures (id text primary key, captured_at text not null, sha256 text not null, bytes integer not null, mock integer not null, jpeg blob not null)")
+        columns = {r[1] for r in self.db.execute("pragma table_info(captures)")}
+        for name, definition in (("trigger", "text not null default 'scheduled'"), ("event_id", "text"), ("motion_score", "real")):
+            if name not in columns:
+                self.db.execute(f'alter table captures add column "{name}" {definition}')
         self.db.commit()
 
-    def add(self, data, captured_at, mock=False):
+    def add(self, data, captured_at, mock=False, trigger="scheduled", event_id=None, motion_score=None):
         if not data.startswith(b"\xff\xd8") or not data.endswith(b"\xff\xd9") or len(data) > MAX_IMAGE:
             raise ValueError("Capture must be a JPEG no larger than 8 MiB")
         identifier = str(uuid.uuid4())
         with self.db:
-            self.db.execute("insert into captures values (?,?,?,?,?,?)", (identifier, captured_at, hashlib.sha256(data).hexdigest(), len(data), int(mock), data))
+            self.db.execute("insert into captures values (?,?,?,?,?,?,?,?,?)", (identifier, captured_at, hashlib.sha256(data).hexdigest(), len(data), int(mock), data, trigger, event_id, motion_score))
         return identifier
 
     def first(self):
         row = self.db.execute("select * from captures order by captured_at,id limit 1").fetchone()
-        return dict(zip(("id", "captured_at", "sha256", "bytes", "mock", "jpeg"), row)) if row else None
+        return dict(zip(("id", "captured_at", "sha256", "bytes", "mock", "jpeg", "trigger", "event_id", "motion_score"), row)) if row else None
 
     def size(self):
         return self.db.execute("select coalesce(sum(bytes),0) from captures").fetchone()[0]
@@ -101,6 +105,7 @@ class Cloud:
                 raise ValueError("Existing object differs; retaining queued capture") from error
         metadata = {k: item[k] for k in ("id", "captured_at", "sha256", "bytes")}
         metadata.update(device_id=self.user_id, object_path=path, is_mock=bool(item["mock"]))
+        metadata.update(trigger=item.get("trigger", "scheduled"), event_id=item.get("event_id"), motion_score=item.get("motion_score"))
         # Ignore a duplicate row only after checking it exactly matches this capture.
         try:
             self.request("/rest/v1/captures", metadata, "POST", headers={"Prefer": "return=minimal"})

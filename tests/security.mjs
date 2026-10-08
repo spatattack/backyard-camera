@@ -12,6 +12,7 @@ create function storage.foldername(text) returns text[] language sql immutable a
 grant usage on schema auth,storage,public to anon,authenticated;
 grant select,insert,update,delete on storage.objects to authenticated;`);
 await db.exec(readFileSync(new URL('../supabase/migrations/20261008152618_backyard_camera.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20261008155414_motion_events.sql',import.meta.url),'utf8'));
 const a='11111111-1111-4111-8111-111111111111', b='22222222-2222-4222-8222-222222222222', id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 await db.exec(`insert into auth.users values ('${a}'),('${b}'); insert into camera_devices values ('${a}','test',true);`);
 const asRole = async(role,uid,sql) => {

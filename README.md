@@ -8,7 +8,9 @@ Requires Node.js 22+ and Python 3.9+. From this folder:
 
 ```sh
 npm ci
-npm test
+python3 -m venv .venv
+.venv/bin/pip install -r device/requirements-motion.txt
+.venv/bin/python -m unittest discover -s tests -v
 npm run test:security
 npm run test:archive
 python3 device/camera.py --config device/config.example.json --mock device/mock.jpg --once --offline
@@ -17,6 +19,10 @@ npm run dev
 ```
 
 Open http://localhost:3000. The site honestly shows that cloud configuration is missing; offline captures remain in `queue/`. `device/mock.jpg` is a synthetic sky/ground colour test, not a real backyard photograph. Use any JPEG up to 8 MiB with `--mock /path/to/photo.jpg`.
+
+## Motion capture
+
+Motion-triggered bursts, ignored regions, a cooldown and video replay are now available. See [Motion setup and testing](docs/MOTION.md). Scheduled-only mode remains available.
 
 ## Connect the cloud
 
@@ -53,7 +59,7 @@ The device can insert into its own folder only if its database registration is e
 - Maximum file size 8 MiB. No automatic cloud deletion or retention policy. At 500 KB per photo, 288/day is about 144 MB/day; review the project's actual storage/egress quota before leaving it unattended for weeks.
 - A permanently invalid oldest item blocks upload until investigated; it is preserved, never silently discarded. Fix clock/config/auth/quota errors, then use `--upload-only`. Back up the queue before manual repair.
 - The Pi needs correct network-synchronised time. Captures more than 10 minutes in the future are rejected.
-- Public anonymous reads are deliberate; there is no admin interface, AI scoring, daily winner, motion detection or video in this MVP.
+- Public anonymous reads are deliberate; there is no admin interface, AI scoring, daily winner, person recognition or continuous video recording in this MVP.
 
 ## Repository layout
 

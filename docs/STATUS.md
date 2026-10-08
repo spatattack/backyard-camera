@@ -32,3 +32,14 @@ Actual Pi camera capture, Wi-Fi outage recovery, systemd camera permissions, pow
 - This Mac has multiple Python installations. Homebrew `/opt/homebrew/bin/python3` passed HTTPS verification; its python.org 3.11 installation has a broken certificate store. Do not disable TLS checks.
 - Vercel connector project creation returned 403. Deployment succeeded using the existing signed-in dashboard after the user handled an optional account-security prompt. This does not affect Git-based deployments or the public site.
 - London Drift was not modified. No admin/service-role key was acquired or exposed.
+
+## Motion extension — 8 October 2026
+
+- Added continuous Picamera2 preview, grayscale motion detection, ignored regions, a configurable three-frame persistence threshold, three-shot bursts, 30-second cooldown and scheduled capture fallback.
+- Recorded-video replay is offline by default; explicit uploads are labelled mock.
+- Existing SQLite queues gain metadata columns without deleting captures. Cloud migration adds constrained trigger/event/score fields without changing upload permissions.
+- Fifteen device tests pass, including generated-video replay and legacy queue migration. Archive tests, RLS tests and the production build pass.
+- Live replay smoke test uploaded one baseline plus three motion frames sharing event ID `da73f850-49b7-4fc6-8d74-aa2d320440fd`; queue drained to zero.
+- Pi execution/performance remains unverified until hardware access. Person/animal recognition and daily photo selection are still not implemented.
+- Latest Supabase advisor check reports an Auth configuration warning: [leaked-password protection is disabled](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection). No RLS finding was reported; this change did not alter Auth settings.
+- Setup: [MOTION.md](MOTION.md).

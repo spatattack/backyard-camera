@@ -6,5 +6,16 @@
   "queue_dir": "./queue",
   "interval_seconds": 300,
   "max_queue_bytes": 2147483648,
-  "min_free_bytes": 268435456
+  "min_free_bytes": 268435456,
+  "motion": {
+    "preview_fps": 5,
+    "pixel_threshold": 25,
+    "changed_fraction": 0.02,
+    "consecutive_frames": 3,
+    "warmup_seconds": 3,
+    "cooldown_seconds": 30,
+    "burst_count": 3,
+    "burst_spacing_seconds": 1,
+    "ignore_regions": []
+  }
 }
