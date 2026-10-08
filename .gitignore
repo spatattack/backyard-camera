@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.vercel/
+.env*
+!.env.example
+queue/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+supabase/.temp/
+device/config.json

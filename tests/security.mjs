@@ -1,0 +1,36 @@
+import {PGlite} from '@electric-sql/pglite';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const db = new PGlite();
+await db.exec(`create role anon; create role authenticated; create schema auth; create schema storage;
+create table auth.users(id uuid primary key);
+create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
+create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text);
+alter table storage.objects enable row level security;
+create function storage.foldername(text) returns text[] language sql immutable as $$ select string_to_array($1,'/') $$;
+grant usage on schema auth,storage,public to anon,authenticated;
+grant select,insert,update,delete on storage.objects to authenticated;`);
+await db.exec(readFileSync(new URL('../supabase/migrations/20261008152618_backyard_camera.sql',import.meta.url),'utf8'));
+const a='11111111-1111-4111-8111-111111111111', b='22222222-2222-4222-8222-222222222222', id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+await db.exec(`insert into auth.users values ('${a}'),('${b}'); insert into camera_devices values ('${a}','test',true);`);
+const asRole = async(role,uid,sql) => {
+  await db.exec(`set role ${role}; select set_config('request.jwt.claim.sub','${uid}',false);`);
+  try {return await db.query(sql);} finally {await db.exec('reset role');}
+};
+const insert = (device=a,captureId=id) => `insert into captures(id,device_id,captured_at,object_path,sha256,bytes) values ('${captureId}','${device}',now(),'${device}/${captureId}.jpg','${'a'.repeat(64)}',10)`;
+await assert.rejects(asRole('authenticated',a,insert()), /row-level security/);
+await assert.rejects(asRole('authenticated',b,`insert into storage.objects(bucket_id,name) values ('backyard-images','${b}/${id}.jpg')`), /row-level security/);
+await assert.rejects(asRole('authenticated',a,`insert into storage.objects(bucket_id,name) values ('backyard-images','${b}/${id}.jpg')`), /row-level security/);
+await asRole('authenticated',a,`insert into storage.objects(bucket_id,name) values ('backyard-images','${a}/${id}.jpg')`);
+await asRole('authenticated',a,insert());
+assert.equal((await asRole('anon','',`select * from captures`)).rows.length,1);
+await assert.rejects(asRole('anon','',insert()), /permission denied/);
+await assert.rejects(asRole('authenticated',a,`update captures set bytes=20`), /permission denied/);
+await assert.rejects(asRole('authenticated',a,`delete from captures`), /permission denied/);
+assert.equal((await asRole('authenticated',a,`delete from storage.objects returning *`)).rows.length,0);
+assert.equal((await asRole('authenticated',a,`update storage.objects set name='changed' returning *`)).rows.length,0);
+await db.exec(`update camera_devices set enabled=false where id='${a}'`);
+await assert.rejects(asRole('authenticated',a,`insert into storage.objects(bucket_id,name) values ('backyard-images','${a}/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jpg')`), /row-level security/);
+console.log('PASS: SQL schema + 11 privilege/RLS checks (local Postgres engine; Storage HTTP not simulated)');
+await db.close();

@@ -1,0 +1,25 @@
+{
+  "name": "backyard-camera",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "python3 -m unittest discover -s tests -v",
+    "test:security": "node tests/security.mjs",
+    "test:archive": "node tests/archive.mjs"
+  },
+  "dependencies": {
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module"
+}

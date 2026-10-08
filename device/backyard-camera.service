@@ -1,0 +1,23 @@
+[Unit]
+Description=Backyard Camera capture and offline uploader
+After=network.target time-sync.target
+
+[Service]
+Type=simple
+User=backyard
+Group=backyard
+SupplementaryGroups=video render
+WorkingDirectory=/var/lib/backyard-camera
+ExecStart=/usr/bin/python3 /opt/backyard-camera/device/camera.py --config /etc/backyard-camera.json
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/backyard-camera
+PrivateTmp=true
+# Do not set PrivateDevices: the camera requires /dev/media*, /dev/video*, /dev/dma_heap.
+
+[Install]
+WantedBy=multi-user.target
