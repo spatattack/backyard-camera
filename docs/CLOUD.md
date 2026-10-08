@@ -32,7 +32,7 @@ Expect an `Uploaded` log and `pending: 0`. In Supabase, check that the object ex
 
 ## 3. Website + GitHub + Vercel
 
-Create an empty private `spatattack/backyard-camera` repository. Push this directory as the repository root (not its parent). No secrets are committed. Import that repository in Vercel; choose Next.js, root `./`, Node 22 or newer, build `npm run build`.
+The `spatattack/backyard-camera` repository has been created by the owner (public). For a fresh setup, create an empty repository. Push this directory as the repository root (not its parent). No secrets are committed. Import that repository in Vercel; choose Next.js, root `./`, Node 22 or newer, build `npm run build`.
 
 Set these for Production and Preview in Vercel:
 
