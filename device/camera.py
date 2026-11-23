@@ -212,7 +212,15 @@ class Cloud:
                 raise
             rows = self.request("/rest/v1/captures?id=eq." + item["id"] + "&select=*")
             if not rows:
-                raise
+                try:
+                    verified = self.request("/rest/v1/rpc/verify_hidden_capture", {"expected": metadata}, "POST")
+                except urllib.error.HTTPError as verify_error:
+                    if verify_error.code == 404:
+                        raise error from None
+                    raise
+                if verified is True:
+                    return
+                raise PermanentUploadError("metadata_conflict") from error
             if any(rows[0].get(k) != v for k, v in metadata.items() if k != "captured_at"):
                 raise PermanentUploadError("metadata_conflict") from error
             if dt.datetime.fromisoformat(rows[0]["captured_at"].replace("Z", "+00:00")) != captured_at:

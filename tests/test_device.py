@@ -92,6 +92,27 @@ class DeviceTests(unittest.TestCase):
             drain(self.q, cloud)
         self.assertEqual(self.q.count(), 0)
         self.assertTrue(any('/rest/v1/captures' in p for p, _ in calls))
+    def test_duplicate_hidden_metadata_uses_device_verification(self):
+        self.q.add(JPEG, NOW)
+        item = self.q.first()
+        cloud = Cloud({'supabase_url':'https://example.supabase.co', 'publishable_key':'test'})
+        cloud.user_id = 'device'
+        def request(path, data=None, method='GET', content_type='application/json', headers=None):
+            if '/rpc/' in path:
+                self.assertEqual(path, '/rest/v1/rpc/verify_hidden_capture')
+                self.assertEqual(data['expected']['id'], item['id'])
+                self.assertEqual(data['expected']['sha256'], item['sha256'])
+                return verified
+            if method == 'GET':
+                return []
+            if path == '/rest/v1/captures':
+                raise HTTPError(path, 409, 'duplicate', {}, io.BytesIO())
+        with patch.object(cloud, 'login'), patch.object(cloud, 'request', side_effect=request):
+            verified = True
+            cloud.upload(item)
+            verified = False
+            with self.assertRaisesRegex(PermanentUploadError, 'metadata_conflict'):
+                cloud.upload(item)
     def test_conflicting_bytes_never_discard_local(self):
         first = self.q.add(JPEG, NOW)
         later = (dt.datetime.fromisoformat(NOW) + dt.timedelta(minutes=5)).isoformat()

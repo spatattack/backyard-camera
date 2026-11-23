@@ -10,6 +10,8 @@ The repository has an offline-first Python capture queue, a labelled Mac mock pa
 
 ## Phase 2 — Photography intelligence
 
+[Cloud labelling](LABELLING.md) now covers basic animal, vehicle and person detection and false motion-trigger filtering. The photography scoring and owner review workflow below remain follow-up work.
+
 1. **Filter and score candidates in the cloud.** Reject corrupt images and failed exposures; score composition, lighting, atmosphere, visual interest and novelty against the usual view. Validate against real examples and track cost before enabling it unattended.
 2. **Build the daily review loop.** Preserve approximately ten strong candidates per day, shortlist five, and let the owner select a winner or override the recommendation. Record selections and feedback; refine ranking before enabling autonomous publication.
 3. **Enrich the useful subset.** Collect timestamps, available exposure data and scores. Generate short descriptions and identify notable scene changes, weather, animals and people without identifying individuals. Explore private visitor recognition only after explicit privacy safeguards and review.
