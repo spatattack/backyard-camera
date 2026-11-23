@@ -10,6 +10,8 @@ The worker uses the Apache-2.0 [OWL-V2 Base detector](https://huggingface.co/goo
 2. In [repository Actions secrets](https://github.com/spatattack/backyard-camera/settings/secrets/actions), add `SUPABASE_URL` for the Backyard project and `SUPABASE_SECRET_KEY` for that project's server-side secret key. Never put the key on the Pi, in Vercel, or in Git.
 3. Merge to the default branch, run **Label captures** manually and check its run log. To retry a permanently failed image after fixing the cause, reset its `label_attempts` to zero in the SQL editor. To release a reviewed capture into the archive, set its `label_visibility` to `visible`; review the image before doing so.
 
+GitHub automatically disables scheduled workflows in public repositories after 60 days without repository activity. While the workflow is disabled, new captures stay unlabelled and visible. To resume, go to **Actions → Label captures → Enable workflow**, or run `gh workflow enable label-captures.yml` from the repository. Scheduled runs will then drain the backlog automatically.
+
 To test on local files without using any Supabase credentials:
 
 ```sh
