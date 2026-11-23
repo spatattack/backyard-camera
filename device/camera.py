@@ -242,9 +242,17 @@ def drain(queue, cloud, limit=100):
         LOG.info("Uploaded %s; pending=%s", item["id"], queue.count())
 
 
+def record_capture_error(queue, code):
+    try:
+        queue.error("capture", code)
+    except sqlite3.Error as error:
+        LOG.warning("Could not save capture health status (%s)", error_code(error))
+
+
 def has_capacity(queue, config):
-    if queue.size() + MAX_IMAGE > config.get("max_queue_bytes", 2 * 1024**3) or shutil.disk_usage(queue.root).free < config.get("min_free_bytes", 256 * 1024**2) + MAX_IMAGE:
-        queue.error("capture", "queue_limit")
+    if (shutil.disk_usage(queue.root).free < config.get("min_free_bytes", 256 * 1024**2) + MAX_IMAGE or
+            queue.size() + MAX_IMAGE > config.get("max_queue_bytes", 2 * 1024**3)):
+        record_capture_error(queue, "queue_limit")
         LOG.warning("Queue/disk limit reached: preserving queued images and skipping new capture")
         return False
     return True
@@ -269,7 +277,7 @@ def capture(queue, config, mock):
 
 def capture_failed(queue, error):
     code = error_code(error)
-    queue.error("capture", code)
+    record_capture_error(queue, code)
     LOG.error("Capture failed (%s); continuing", code)
 
 

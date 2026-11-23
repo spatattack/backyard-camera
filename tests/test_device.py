@@ -2,10 +2,11 @@ import datetime as dt
 import io
 import json
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'device'))
 from camera import Queue, Cloud, capture, drain, main, run_scheduled
@@ -46,6 +47,29 @@ class DeviceTests(unittest.TestCase):
         self.q.add(JPEG, NOW)
         capture(self.q, {'max_queue_bytes':1}, '/does/not/exist.jpg')
         self.assertEqual(self.q.count(), 1)
+    def test_full_disk_cannot_stop_the_capture_loop_when_health_writes_fail(self):
+        stop = Mock()
+        stop.is_set.side_effect = [False, False, True]
+        full = sqlite3.OperationalError('database or disk is full')
+        path = Path(self.temp.name) / 'mock.jpg'
+        path.write_bytes(JPEG)
+        with patch('camera.shutil.disk_usage', side_effect=[Mock(free=0), Mock(free=2 ** 30)]), \
+             patch.object(self.q, 'error', side_effect=full) as write_error, \
+             self.assertLogs('backyard', level='WARNING') as logs:
+            run_scheduled(self.q, {}, str(path), stop, 300, None)
+        write_error.assert_called_once_with('capture', 'queue_limit')
+        self.assertIn('skipping new capture', '\n'.join(logs.output))
+        self.assertEqual(self.q.count(), 1)
+    def test_capture_loop_recovers_when_capture_and_health_write_hit_full_disk(self):
+        stop = Mock()
+        stop.is_set.side_effect = [False, False, True]
+        full = sqlite3.OperationalError('database or disk is full')
+        with patch('camera.capture', side_effect=[full, None]) as take, \
+             patch.object(self.q, 'error', side_effect=full), \
+             self.assertLogs('backyard', level='WARNING') as logs:
+            run_scheduled(self.q, {}, 'mock.jpg', stop, 300, None)
+        self.assertEqual(take.call_count, 2)
+        self.assertIn('Capture failed (OperationalError)', '\n'.join(logs.output))
     def test_invalid_jpeg_not_queued(self):
         with self.assertRaises(ValueError): self.q.add(b'not a jpeg', NOW)
         self.assertEqual(self.q.count(), 0)
