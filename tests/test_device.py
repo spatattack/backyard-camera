@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'device'))
-from camera import Queue, Cloud, capture, drain, main, run_scheduled
+from camera import Queue, Cloud, PermanentUploadError, capture, drain, main, run_scheduled
 from daylight import Daylight, london_daylight
 
 JPEG = b'\xff\xd8test-jpeg\xff\xd9'
@@ -240,6 +240,20 @@ class DeviceTests(unittest.TestCase):
         daylight.assert_not_called()
         self.assertEqual(cloud.return_value.upload.call_count, 1)
         self.assertEqual(self.q.status()['upload_status'], 'ok')
+
+    def test_upload_only_fails_when_it_quarantines_a_capture(self):
+        capture_id = self.q.add(JPEG, NOW)
+        config = json.dumps({'queue_dir': self.temp.name})
+        with patch.object(sys, 'argv', ['camera.py', '--config', '/dev/stdin', '--upload-only']), \
+             patch('camera.Path.read_text', return_value=config), patch('camera.Cloud') as cloud:
+            cloud.return_value.upload.side_effect = PermanentUploadError('object_hash_conflict')
+            with self.assertRaises(SystemExit) as error:
+                main()
+        self.assertEqual(error.exception.code, 1)
+        status = self.q.status()
+        self.assertIsNone(status['last_upload_at'])
+        self.assertEqual(status['upload_status'], 'quarantined')
+        self.assertEqual(self.q.db.execute('select id,jpeg from captures').fetchall(), [(capture_id, JPEG)])
 
 
 class DaylightTests(unittest.TestCase):

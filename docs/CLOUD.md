@@ -34,6 +34,8 @@ python3 device/camera.py --config device/config.json --status
 
 Expect an `Uploaded` log, `pending: 0`, `quarantined: 0`, and a fresh `last_upload_at`. In Supabase, check that the object exists and that the matching `captures` row has `is_mock = true`. A file alone is not sufficient: the metadata insert must also succeed. Re-run `--upload-only` after any outage; the client checks duplicate objects and rows rather than overwriting them.
 
+A manual upload exits nonzero if it quarantines any new capture, even if it uploads other captures in the same run. Check `--status` and the logs; the quarantined image is still stored locally.
+
 ## 3. Website + GitHub + Vercel
 
 The `spatattack/backyard-camera` repository has been created by the owner (public). For a fresh setup, create an empty repository. Push this directory as the repository root (not its parent). No secrets are committed. Import that repository in Vercel; choose Next.js, root `./`, Node 22 or newer, build `npm run build`.

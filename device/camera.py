@@ -220,15 +220,17 @@ class Cloud:
 
 
 def drain(queue, cloud, limit=100):
+    quarantined = 0
     for _ in range(limit):
         item = queue.first()
         if item is None:
-            return
+            break
         try:
             cloud.upload(item)
         except PermanentUploadError as error:
             code = error_code(error)
             queue.quarantine(item["id"], code)
+            quarantined += 1
             LOG.error("Quarantined %s (%s); image retained locally", item["id"], code)
             continue
         except Exception as error:
@@ -240,6 +242,7 @@ def drain(queue, cloud, limit=100):
             raise
         queue.uploaded(item["id"])
         LOG.info("Uploaded %s; pending=%s", item["id"], queue.count())
+    return quarantined
 
 
 def record_capture_error(queue, code):
@@ -292,9 +295,11 @@ def configured_cloud(queue, config):
 
 def upload_pending(queue, config, limit=100):
     try:
-        drain(queue, configured_cloud(queue, config), limit)
+        quarantined = drain(queue, configured_cloud(queue, config), limit)
     except Exception:
         raise SystemExit(1) from None
+    if quarantined:
+        raise SystemExit(1)
 
 
 def worker(config, stop):
