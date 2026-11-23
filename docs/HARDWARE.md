@@ -1,6 +1,6 @@
 # Pi 3 A+ + Camera Module 3 bring-up
 
-Do the cloud mock upload first. The Pi runs only Python and `rpicam-still`; do not build Next.js on its 512 MB RAM.
+Do the cloud mock upload first. The Pi runs only Python, Picamera2 and `rpicam-still`; do not build Next.js on its 512 MB RAM. The service runs motion-triggered capture with the five-minute schedule as a baseline ([MOTION.md](MOTION.md)); scheduled-only capture remains available as a fallback (section 6).
 
 ## 1. Prepare the card and camera
 
@@ -16,14 +16,14 @@ Replace `YOUR_USER` below with the Imager login:
 ```sh
 ssh YOUR_USER@backyard-camera.local
 sudo apt update
-sudo apt install -y python3 rpicam-apps-lite
+sudo apt install -y python3 python3-picamera2 python3-numpy rpicam-apps-lite
 rpicam-hello --list-cameras
 rpicam-still --nopreview --timeout 2000 --autofocus-mode auto --width 2304 --height 1296 --quality 85 --output /tmp/backyard-test.jpg
 ls -lh /tmp/backyard-test.jpg
 timedatectl status
 ```
 
-Expected: the camera list shows an IMX708, a nonempty JPEG is created, and system time is synchronized. If package `rpicam-apps-lite` is unavailable for your chosen image, use `rpicam-apps`. On Bookworm and later, use `rpicam-*`, not legacy `raspistill`. Camera Module 3 is unsupported by the legacy camera stack.
+Expected: the camera list shows an IMX708, a nonempty JPEG is created, and system time is synchronized. If package `rpicam-apps-lite` is unavailable for your chosen image, use `rpicam-apps`. On Bookworm and later, use `rpicam-*`, not legacy `raspistill`. Camera Module 3 is unsupported by the legacy camera stack. Picamera2 and NumPy must come from these Raspberry Pi OS apt packages; do not pip-install the Mac `requirements-motion.txt` on the Pi.
 
 From the Mac inspect the result:
 
@@ -39,7 +39,7 @@ If no camera: power off, reseat ribbon at both ends, ensure the current OS has `
 From this repository on your Mac:
 
 ```sh
-scp device/camera.py device/daylight.py device/backyard-camera.service YOUR_USER@backyard-camera.local:/tmp/
+scp device/camera.py device/daylight.py device/motion.py device/watch.py device/backyard-camera.service device/scheduled-only.conf YOUR_USER@backyard-camera.local:/tmp/
 scp device/config.json YOUR_USER@backyard-camera.local:/tmp/backyard-camera.json
 ```
 
@@ -52,12 +52,14 @@ sudo install -d -o root -g root -m 755 /opt/backyard-camera/device
 sudo install -d -o backyard -g backyard -m 700 /var/lib/backyard-camera
 sudo install -o root -g root -m 644 /tmp/camera.py /opt/backyard-camera/device/camera.py
 sudo install -o root -g root -m 644 /tmp/daylight.py /opt/backyard-camera/device/daylight.py
+sudo install -o root -g root -m 644 /tmp/motion.py /opt/backyard-camera/device/motion.py
+sudo install -o root -g root -m 644 /tmp/watch.py /opt/backyard-camera/device/watch.py
 sudo install -o backyard -g backyard -m 600 /tmp/backyard-camera.json /etc/backyard-camera.json
 sudo install -o root -g root -m 644 /tmp/backyard-camera.service /etc/systemd/system/backyard-camera.service
 sudo -u backyard nano /etc/backyard-camera.json
 ```
 
-Set `queue_dir` to `/var/lib/backyard-camera/queue`; retain `"interval_seconds": 300`. The device computes approximate London sunrise and sunset locally from its UTC clock; no network lookup is required. `"daylight_margin_minutes": 0` uses sunrise and sunset as calculated. A positive value (e.g. `15`) starts later and ends earlier; a negative value expands the window. The accepted range is −120 to 120 minutes. Uploads continue at night. Confirm the URL, publishable key, device email and password. Remove the transferred temporary config once the installed copy is checked: `rm /tmp/backyard-camera.json`.
+Set `queue_dir` to `/var/lib/backyard-camera/queue`; retain `"interval_seconds": 300`. The device computes approximate London sunrise and sunset locally from its UTC clock; no network lookup is required. `"daylight_margin_minutes": 0` uses sunrise and sunset as calculated. A positive value (e.g. `15`) starts later and ends earlier; a negative value expands the window. The accepted range is −120 to 120 minutes. Uploads continue at night. Confirm the URL, publishable key, device email and password. Motion detection works with defaults; optionally copy the `motion` section from `config.example.json` to tune it ([MOTION.md](MOTION.md#defaults-and-tuning)). Remove the transferred temporary config once the installed copy is checked: `rm /tmp/backyard-camera.json`.
 
 If rerunning setup and user `backyard` already exists, skip `useradd`. Raspberry Pi OS normally provides `video` and `render`; if either is missing, investigate the camera/OS install rather than ignoring device permission failures.
 
@@ -69,7 +71,16 @@ sudo -u backyard python3 /opt/backyard-camera/device/camera.py --config /etc/bac
 sudo -u backyard python3 /opt/backyard-camera/device/camera.py --config /etc/backyard-camera.json --status
 ```
 
-`--once` ignores daylight for this check. Expect `Uploaded`, `pending: 0`, `quarantined: 0`, and fresh `last_capture_at` and `last_upload_at` values. Open the website and confirm a real photograph is visible at the right UTC time. Only then enable the service:
+`--once` ignores daylight for this check. Expect `Uploaded`, `pending: 0`, `quarantined: 0`, and fresh `last_capture_at` and `last_upload_at` values. Open the website and confirm a real photograph is visible at the right UTC time.
+
+Then test motion capture in the foreground during London daylight (Ctrl-C to stop). Walk into the camera's view and look for `trigger=motion` with three shared event IDs in the log, then drain the queue:
+
+```sh
+sudo -u backyard /usr/bin/python3 /opt/backyard-camera/device/watch.py --config /etc/backyard-camera.json --offline
+sudo -u backyard python3 /opt/backyard-camera/device/camera.py --config /etc/backyard-camera.json --upload-only
+```
+
+Only then enable the service, which runs `watch.py` (motion bursts plus the five-minute baseline):
 
 ```sh
 sudo systemctl daemon-reload
@@ -78,7 +89,7 @@ sudo systemctl status backyard-camera --no-pager
 sudo journalctl -u backyard-camera -n 40 --no-pager
 ```
 
-During daylight, wait a little over five minutes and verify another image appears. See the acceptance run below for reboot and Wi-Fi checks.
+Expect the service process in `systemctl status` to be `watch.py`. During daylight, wait a little over five minutes and verify another image appears even without motion. See the acceptance run below for reboot and Wi-Fi checks.
 
 ## 5. Offline test and placement
 
@@ -97,6 +108,18 @@ Expect the pending count to increase by one before upload, then go to zero with 
 **Physical acceptance run:** During daylight, with local console access or a way to re-enable Wi-Fi without SSH, disconnect the Pi's Wi-Fi while the service runs. Verify that `last_capture_at` advances, `pending` grows, `last_upload_at` stays unchanged, and the journal shows deferred upload. Re-enable Wi-Fi and wait for backoff (up to about five minutes): confirm the pending queue drains and the website shows each capture once. Reboot the Pi, confirm the unit starts on boot and the system clock is synchronized, then verify another scheduled upload. After sunset, verify no unattended captures are added; an image queued with `--once --offline` while the service is stopped should still upload after restarting the service. Do not intentionally cut power during this run; a reboot verifies service startup, not survival of every possible storage failure.
 
 Frame only the scene you intend to publish. Start indoors looking through a clean window, reduce indoor reflections, and check autofocus before sealing any enclosure. An IP65 box is not a complete weatherproof installation: cable entries, condensation and heat still need physical inspection.
+
+## 6. Scheduled-only fallback
+
+If motion mode misbehaves on the hardware (CPU, memory, false triggers), switch the service back to the five-minute `camera.py` schedule with the shipped drop-in:
+
+```sh
+sudo install -D -o root -g root -m 644 /tmp/scheduled-only.conf /etc/systemd/system/backyard-camera.service.d/scheduled-only.conf
+sudo systemctl daemon-reload
+sudo systemctl restart backyard-camera
+```
+
+Return to motion mode with `sudo rm /etc/systemd/system/backyard-camera.service.d/scheduled-only.conf`, then reload and restart. Both modes share the same queue, config and uploader; updated `camera.py` reads queues that already have motion columns.
 
 ## Routine checks
 

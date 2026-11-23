@@ -22,7 +22,7 @@ Open http://localhost:3000. Without cloud configuration the site shows a setup n
 
 ## Motion capture
 
-Motion-triggered bursts, ignored regions, a cooldown and video replay are now available. See [Motion setup and testing](docs/MOTION.md). Scheduled-only mode remains available.
+The Pi service runs motion-triggered capture by default: three-shot bursts on sustained movement, ignored regions and a cooldown, on top of the five-minute daylight baseline. Video replay lets you test it on a Mac. See [Motion setup and testing](docs/MOTION.md). Scheduled-only mode (`camera.py`) remains available as a fallback ([Hardware bring-up](docs/HARDWARE.md#6-scheduled-only-fallback)).
 
 ## Connect the cloud
 
@@ -45,7 +45,7 @@ The first command drains any queued offline captures; the second adds and upload
 
 ## How it works
 
-1. `rpicam-still` autofocuses and captures a 2304×1296 JPEG at quality 85.
+1. On the Pi, `watch.py` keeps a Picamera2 session open, watches a small preview for motion and saves 2304×1296 JPEGs for motion bursts and the five-minute baseline. The scheduled-only fallback (`camera.py`) uses `rpicam-still` with autofocus at quality 85.
 2. Python commits image bytes + UUID + UTC capture time + SHA-256 to SQLite (WAL, full synchronous writes).
 3. A separate upload thread signs in as a dedicated Supabase Auth user, sends the image, then inserts metadata. It renews login before token expiry and backs off on failures.
 4. Only after both operations succeed is the local item removed. UUID paths and duplicate verification make lost-response retries safe.
@@ -65,7 +65,7 @@ The device can insert into its own folder only if its database registration is e
 
 ## Repository layout
 
-- `device/`: standard-library Python capture/uploader, sample config, mock JPEG, systemd unit.
+- `device/`: Python capture/uploader (`camera.py`), motion watcher (`watch.py`, `motion.py`), sample config, mock JPEG, systemd unit (motion by default) and scheduled-only drop-in.
 - `supabase/migrations/`: additive, one-time database and Storage policies.
 - `app/`, `lib/`: Next.js archive.
 - `tests/`: queue/retry tests, RLS tests on a local PostgreSQL engine, archive tests.

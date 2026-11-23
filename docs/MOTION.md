@@ -18,9 +18,9 @@ Replay runs faster than real time. Motion timing and cooldown use video frame ti
 
 The automated replay test generates a short video containing a moving rectangle and verifies one scheduled image plus a grouped three-shot burst. No personal video is needed for the tests.
 
-## Pi: enable motion mode
+## Pi: motion mode is the default
 
-Keep the existing scheduled-only setup available as a fallback. Stop the service before replacing files or running another capture process.
+A fresh install following [HARDWARE.md](HARDWARE.md) runs `watch.py` (motion bursts plus the five-minute baseline) from the shipped `backyard-camera.service`. To upgrade an existing scheduled-only Pi, stop the service before replacing files or running another capture process.
 
 ```sh
 sudo systemctl stop backyard-camera
@@ -28,7 +28,7 @@ sudo apt update
 sudo apt install -y python3-picamera2 python3-numpy
 ```
 
-Copy `device/camera.py`, `device/daylight.py`, `device/motion.py`, and `device/watch.py` from the repository to `/opt/backyard-camera/device/` (root-owned, mode 644). Picamera2 must come from Raspberry Pi OS apt packages; do not install the Mac OpenCV requirements on the Pi. It only needs NumPy and Picamera2.
+Copy `device/camera.py`, `device/daylight.py`, `device/motion.py`, and `device/watch.py` from the repository to `/opt/backyard-camera/device/` (root-owned, mode 644), and the updated `device/backyard-camera.service` to `/etc/systemd/system/`. Picamera2 must come from Raspberry Pi OS apt packages; do not install the Mac OpenCV requirements on the Pi. It only needs NumPy and Picamera2.
 
 The existing device config continues to work with defaults. Optionally copy the `motion` section from `config.example.json` into `/etc/backyard-camera.json`, retaining your own credentials and absolute `queue_dir`.
 
@@ -39,21 +39,7 @@ sudo -u backyard /usr/bin/python3 /opt/backyard-camera/device/watch.py --config 
 sudo -u backyard /usr/bin/python3 /opt/backyard-camera/device/camera.py --config /etc/backyard-camera.json --status
 ```
 
-Walk into the camera's view and inspect the logs for `trigger=motion` and three shared event IDs. Then drain the queue with `--upload-only` and check the website. To enable service mode:
-
-```sh
-sudo systemctl edit backyard-camera
-```
-
-Paste this override:
-
-```ini
-[Service]
-ExecStart=
-ExecStart=/usr/bin/python3 /opt/backyard-camera/device/watch.py --config /etc/backyard-camera.json
-```
-
-Then:
+Walk into the camera's view and inspect the logs for `trigger=motion` and three shared event IDs. Then drain the queue with `--upload-only` and check the website. Start the service in motion mode:
 
 ```sh
 sudo systemctl daemon-reload
@@ -61,7 +47,9 @@ sudo systemctl restart backyard-camera
 sudo journalctl -u backyard-camera -n 40 --no-pager
 ```
 
-For scheduled-only fallback, edit that same override and set the executable back to `device/camera.py`, then reload/restart. Updated `camera.py` reads both old and new queues. Do not roll back to an old copy of that file after the queue has gained motion columns.
+If you earlier added a `systemctl edit` override pointing at `watch.py`, it is no longer needed; remove it with `sudo systemctl revert backyard-camera` (this also removes any other drop-ins) before installing the fallback below.
+
+For scheduled-only fallback, install `device/scheduled-only.conf` as `/etc/systemd/system/backyard-camera.service.d/scheduled-only.conf`, then reload/restart ([HARDWARE.md section 6](HARDWARE.md#6-scheduled-only-fallback)). Delete that file and reload/restart to return to motion mode. Updated `camera.py` reads both old and new queues. Do not roll back to an old copy of that file after the queue has gained motion columns.
 
 ## Defaults and tuning
 
