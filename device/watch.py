@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """Motion + scheduled capture. Recorded video is offline unless --upload is explicit."""
 import argparse
-import datetime as dt
 import fcntl
 import io
 import json
 import logging
 import os
 from pathlib import Path
-import shutil
 import signal
 import threading
 import time
 
-from camera import Queue, MAX_IMAGE, worker, drain, Cloud
+from camera import Queue, capture_failed, has_capacity, upload_pending, utc_now, worker
+from daylight import Daylight
 from motion import Detector, Planner
 
 LOG = logging.getLogger('backyard')
@@ -37,7 +36,11 @@ class PiSource:
 
     def read(self):
         request = self.camera.capture_request()
-        gray = request.make_array('lores')[:self.height, :self.width].copy()
+        try:
+            gray = request.make_array('lores')[:self.height, :self.width].copy()
+        except Exception:
+            self.release(request)
+            raise
         return time.monotonic()-self.started, gray, request
 
     def jpeg(self, frame):
@@ -88,33 +91,55 @@ class VideoSource:
         self.video.release()
 
 
-def run(source, config, stop, mock=False):
+def run(source, config, stop, mock=False, daylight=None):
     queue = Queue(config['queue_dir'])
     detector = Detector(config.get('motion', {}))
     planner = Planner(config.get('motion', {}), config.get('interval_seconds',300))
-    planner.next_scheduled = detector.warmup
+    new_session = True
     count = 0
     try:
         while not stop.is_set():
-            sample = source.read()
+            if daylight is not None and not daylight.allows(utc_now()):
+                if not new_session:
+                    detector = Detector(config.get('motion', {}))
+                    planner = Planner(config.get('motion', {}), config.get('interval_seconds',300))
+                    new_session = True
+                stop.wait(30)
+                continue
+            try:
+                sample = source.read()
+            except Exception as error:
+                capture_failed(queue, error)
+                stop.wait(1)
+                continue
             if sample is None:
                 break
             now, gray, frame = sample
             try:
+                if new_session:
+                    planner.next_scheduled = now + detector.warmup
+                    new_session = False
                 moving, score = detector.update(gray, now)
                 metadata = planner.update(now, moving, score)
                 if not metadata:
                     continue
-                if queue.size()+MAX_IMAGE > config.get('max_queue_bytes',2*1024**3) or shutil.disk_usage(queue.root).free < config.get('min_free_bytes',256*1024**2)+MAX_IMAGE:
-                    LOG.warning('Queue/disk limit reached; skipping capture')
+                try:
+                    if not has_capacity(queue, config):
+                        continue
+                    captured_at = utc_now()
+                    if daylight is not None and not daylight.allows(captured_at):
+                        continue
+                    identifier = queue.add(source.jpeg(frame), captured_at.isoformat(), mock, **metadata)
+                except Exception as error:
+                    capture_failed(queue, error)
                     continue
-                # Replay uses ingestion time and is always labelled mock.
-                captured_at = dt.datetime.now(dt.timezone.utc).isoformat()
-                identifier = queue.add(source.jpeg(frame), captured_at, mock, **metadata)
                 count += 1
                 LOG.info('Queued %s trigger=%s event=%s source_seconds=%.2f score=%.3f',identifier,metadata['trigger'],metadata['event_id'],now,score)
             finally:
-                source.release(frame)
+                try:
+                    source.release(frame)
+                except Exception as error:
+                    capture_failed(queue, error)
     finally:
         source.close()
         queue.db.close()
@@ -146,17 +171,18 @@ def main():
     initial_queue.db.close()
     Detector(config.get("motion", {}))
     Planner(config.get("motion", {}), config.get("interval_seconds", 300))
+    daylight = None if args.video else Daylight(config)
     source = VideoSource(args.video,fps) if args.video else PiSource(fps)
     upload = not args.offline and (not args.video or args.upload)
     uploader = None
     if upload and not args.video:
         uploader = threading.Thread(target=worker,args=(config,stop),daemon=True);uploader.start()
     try:
-        count = run(source,config,stop,mock=bool(args.video))
+        count = run(source,config,stop,mock=bool(args.video),daylight=daylight)
         LOG.info('Capture session finished: %d images',count)
         if upload and args.video:
             queue = Queue(root)
-            try: drain(queue,Cloud(config),limit=1000000)
+            try: upload_pending(queue,config,limit=1000000)
             finally: queue.db.close()
     finally:
         stop.set()

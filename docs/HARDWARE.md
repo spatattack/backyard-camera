@@ -39,7 +39,7 @@ If no camera: power off, reseat ribbon at both ends, ensure the current OS has `
 From this repository on your Mac:
 
 ```sh
-scp device/camera.py device/backyard-camera.service YOUR_USER@backyard-camera.local:/tmp/
+scp device/camera.py device/daylight.py device/backyard-camera.service YOUR_USER@backyard-camera.local:/tmp/
 scp device/config.json YOUR_USER@backyard-camera.local:/tmp/backyard-camera.json
 ```
 
@@ -51,12 +51,13 @@ sudo usermod -aG video,render backyard
 sudo install -d -o root -g root -m 755 /opt/backyard-camera/device
 sudo install -d -o backyard -g backyard -m 700 /var/lib/backyard-camera
 sudo install -o root -g root -m 644 /tmp/camera.py /opt/backyard-camera/device/camera.py
+sudo install -o root -g root -m 644 /tmp/daylight.py /opt/backyard-camera/device/daylight.py
 sudo install -o backyard -g backyard -m 600 /tmp/backyard-camera.json /etc/backyard-camera.json
 sudo install -o root -g root -m 644 /tmp/backyard-camera.service /etc/systemd/system/backyard-camera.service
 sudo -u backyard nano /etc/backyard-camera.json
 ```
 
-Set `queue_dir` to `/var/lib/backyard-camera/queue`; retain `interval_seconds: 300`. Confirm the URL, publishable key, device email and password. Remove the transferred temporary config once the installed copy is checked: `rm /tmp/backyard-camera.json`.
+Set `queue_dir` to `/var/lib/backyard-camera/queue`; retain `"interval_seconds": 300`. The device computes approximate London sunrise and sunset locally from its UTC clock; no network lookup is required. `"daylight_margin_minutes": 0` uses sunrise and sunset as calculated. A positive value (e.g. `15`) starts later and ends earlier; a negative value expands the window. The accepted range is −120 to 120 minutes. Uploads continue at night. Confirm the URL, publishable key, device email and password. Remove the transferred temporary config once the installed copy is checked: `rm /tmp/backyard-camera.json`.
 
 If rerunning setup and user `backyard` already exists, skip `useradd`. Raspberry Pi OS normally provides `video` and `render`; if either is missing, investigate the camera/OS install rather than ignoring device permission failures.
 
@@ -68,7 +69,7 @@ sudo -u backyard python3 /opt/backyard-camera/device/camera.py --config /etc/bac
 sudo -u backyard python3 /opt/backyard-camera/device/camera.py --config /etc/backyard-camera.json --status
 ```
 
-Expect `Uploaded` and `pending: 0`. Open the website and confirm a REAL photograph is visible at the right UTC time. Only then enable the service:
+`--once` ignores daylight for this check. Expect `Uploaded`, `pending: 0`, `quarantined: 0`, and fresh `last_capture_at` and `last_upload_at` values. Open the website and confirm a real photograph is visible at the right UTC time. Only then enable the service:
 
 ```sh
 sudo systemctl daemon-reload
@@ -77,7 +78,7 @@ sudo systemctl status backyard-camera --no-pager
 sudo journalctl -u backyard-camera -n 40 --no-pager
 ```
 
-Wait a little over five minutes and verify another image appears. Reboot once and verify the service starts and uploads again.
+During daylight, wait a little over five minutes and verify another image appears. See the acceptance run below for reboot and Wi-Fi checks.
 
 ## 5. Offline test and placement
 
@@ -91,7 +92,9 @@ sudo -u backyard python3 /opt/backyard-camera/device/camera.py --config /etc/bac
 sudo systemctl start backyard-camera
 ```
 
-Expect queue count 1 before upload and 0 afterward. This tests the local recovery path; an actual network-outage test can be done later with physical access.
+Expect the pending count to increase by one before upload, then go to zero with a new `last_upload_at`. This tests local recovery without disconnecting SSH.
+
+**Physical acceptance run:** During daylight, with local console access or a way to re-enable Wi-Fi without SSH, disconnect the Pi's Wi-Fi while the service runs. Verify that `last_capture_at` advances, `pending` grows, `last_upload_at` stays unchanged, and the journal shows deferred upload. Re-enable Wi-Fi and wait for backoff (up to about five minutes): confirm the pending queue drains and the website shows each capture once. Reboot the Pi, confirm the unit starts on boot and the system clock is synchronized, then verify another scheduled upload. After sunset, verify no unattended captures are added; an image queued with `--once --offline` while the service is stopped should still upload after restarting the service. Do not intentionally cut power during this run; a reboot verifies service startup, not survival of every possible storage failure.
 
 Frame only the scene you intend to publish. Start indoors looking through a clean window, reduce indoor reflections, and check autofocus before sealing any enclosure. An IP65 box is not a complete weatherproof installation: cable entries, condensation and heat still need physical inspection.
 
@@ -104,7 +107,7 @@ vcgencmd get_throttled
 sudo -u backyard python3 /opt/backyard-camera/device/camera.py --config /etc/backyard-camera.json --status
 ```
 
-`get_throttled=0x0` indicates no current/historical throttling flags since boot. Upload failures retain queued files; repeated capture errors mean inspect the camera and service permissions. Stop with `sudo systemctl stop backyard-camera` before manually capturing into the same queue.
+`get_throttled=0x0` indicates no current/historical throttling flags since boot. Status JSON includes UTC `last_capture_at`, `last_upload_at`, `pending`, `quarantined`, total retained image `bytes`, and `upload_status` (`idle`, `pending`, `retrying`, `ok`, or `quarantined`). `last_error` records the most recent failure time, operation, and safe code; it remains visible after a recovery. A quarantined image still consumes storage. The journal shows its ID and reason; stop the service and back up the queue before any manual inspection or repair. Repeated capture errors mean inspect the camera and service permissions. Stop with `sudo systemctl stop backyard-camera` before manually capturing into the same queue.
 
 References: [Camera software](https://www.raspberrypi.com/documentation/computers/camera_software.html), [Camera hardware](https://www.raspberrypi.com/documentation/accessories/camera.html), [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 

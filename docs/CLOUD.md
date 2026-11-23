@@ -5,7 +5,11 @@ Use a dedicated Backyard Camera project; do not apply this schema to London Drif
 ## 1. Supabase
 
 1. Create `Backyard Camera` in your chosen organization. Choose London (`eu-west-2`) if offered. Review the displayed plan/cost. Keep the standard Postgres engine and Data API enabled. Save the database password privately; the app and device do not need it.
-2. Run `supabase/migrations/20261008152618_backyard_camera.sql` in the project's SQL Editor. Alternatively use Supabase CLI migration tooling against this dedicated project. Do not run both paths.
+2. Apply both migrations in order, using the project's SQL Editor or Supabase CLI migration tooling, not both:
+   1. `supabase/migrations/20261008152618_backyard_camera.sql` (tables, Storage bucket, and RLS)
+   2. `supabase/migrations/20261008155414_motion_events.sql` (columns and grants required by both the uploader and archive, even for scheduled-only captures)
+
+   For an existing project, verify which migrations were applied and run only the missing ones.
 3. Check `camera_devices`, `captures`, the `backyard-images` bucket and their RLS policies. The bucket is PUBLIC because this product is a public archive; only registered devices may write.
 4. In Authentication → Users → Add user, create a dedicated device user with a long unique password and Auto Confirm enabled. Do not use your personal account password. No invitation or email needs to be sent. Copy its UUID.
 5. Register that UUID in SQL Editor:
@@ -28,7 +32,9 @@ python3 device/camera.py --config device/config.json --mock device/mock.jpg --on
 python3 device/camera.py --config device/config.json --status
 ```
 
-Expect an `Uploaded` log and `pending: 0`. In Supabase, check that the object exists and that the matching `captures` row has `is_mock = true`. A file alone is not sufficient: the metadata insert must also succeed. Re-run `--upload-only` after any outage; the client checks duplicate objects and rows rather than overwriting them.
+Expect an `Uploaded` log, `pending: 0`, `quarantined: 0`, and a fresh `last_upload_at`. In Supabase, check that the object exists and that the matching `captures` row has `is_mock = true`. A file alone is not sufficient: the metadata insert must also succeed. Re-run `--upload-only` after any outage; the client checks duplicate objects and rows rather than overwriting them.
+
+A manual upload exits nonzero if it quarantines any new capture, even if it uploads other captures in the same run. Check `--status` and the logs; the quarantined image is still stored locally.
 
 ## 3. Website + GitHub + Vercel
 
@@ -41,7 +47,7 @@ Set these for Production and Preview in Vercel:
 | `SUPABASE_URL` | Dedicated project's HTTPS URL | No |
 | `SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...` | Public API credential, protected by RLS |
 
-Do not add a service-role key or device password. Deploy and open the resulting URL. Confirm the mock JPEG loads and is labelled MOCK CAPTURE. Filter by its UTC date. GitHub pushes will trigger Vercel deployments once the Git integration is connected; GitHub Actions runs build/tests independently. Configure a required check/branch protection if desired.
+Do not add a service-role key or device password. Deploy and open the resulting URL. Confirm the mock JPEG loads and is labelled MOCK · FIVE-MINUTE STUDY. Filter by its UTC date. Return to the latest unfiltered archive, leave the tab visible, and upload another mock: it should appear within about a minute without a manual reload or redeploy. GitHub pushes will trigger Vercel deployments once the Git integration is connected; GitHub Actions runs build/tests independently.
 
 ## 4. Revocation and recovery
 

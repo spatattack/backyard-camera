@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {validDate, getArchive} from '../lib/archive.js';
+import {isLatestArchive, startArchiveRefresh} from '../lib/archive-refresh.js';
 assert(validDate('2026-10-08'));
 assert(!validDate('2026-02-30'));
 assert(!validDate('2026-10-08&offset=999'));
@@ -18,3 +19,21 @@ assert.equal(observed.options.headers.apikey,'test-publishable');
 global.fetch=async()=>({ok:false});
 assert.equal((await getArchive()).status,'error');
 console.log('PASS: archive date validation, configuration, pagination, UTC boundaries and error states');
+assert(isLatestArchive(undefined, 0));
+assert(!isLatestArchive(undefined, 1));
+assert(!isLatestArchive('2026-10-08', 0));
+assert(!isLatestArchive('invalid', 0));
+let tick, cleared, refreshes = 0;
+const browser = {
+  document: {visibilityState: 'visible'},
+  setInterval(fn, delay) { tick = fn; assert.equal(delay, 60000); return 1; },
+  clearInterval(id) { cleared = id; },
+};
+const stop = startArchiveRefresh(() => refreshes++, browser);
+tick();
+browser.document.visibilityState = 'hidden';
+tick();
+assert.equal(refreshes, 1);
+stop();
+assert.equal(cleared, 1);
+console.log('PASS: only the latest unfiltered archive refreshes, every minute while visible');
