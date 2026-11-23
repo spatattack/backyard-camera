@@ -39,17 +39,21 @@ sudo -u backyard /usr/bin/python3 /opt/backyard-camera/device/watch.py --config 
 sudo -u backyard /usr/bin/python3 /opt/backyard-camera/device/camera.py --config /etc/backyard-camera.json --status
 ```
 
-Walk into the camera's view and inspect the logs for `trigger=motion` and three shared event IDs. Then drain the queue with `--upload-only` and check the website. Start the service in motion mode. The first command removes any override made earlier with `systemctl edit backyard-camera` (for the old opt-in motion mode or its scheduled-only fallback); a leftover override pointing at `camera.py` would keep motion capture off:
+Walk into the camera's view and inspect the logs for `trigger=motion` and three shared event IDs. Then drain the queue with `--upload-only` and check the website. Before restarting, check for an override made earlier with `systemctl edit backyard-camera` (for the old opt-in motion mode or its scheduled-only fallback); a leftover override pointing at `camera.py` would keep motion capture off:
 
 ```sh
-sudo rm -f /etc/systemd/system/backyard-camera.service.d/override.conf
 sudo systemctl daemon-reload
+systemctl cat backyard-camera | grep -n 'ExecStart\|^# /'
+```
+
+If an `override.conf` sets `ExecStart`, run `sudo systemctl edit backyard-camera` and delete only its two `ExecStart=` lines, keeping any other local settings. Then start the service in motion mode:
+
+```sh
 sudo systemctl restart backyard-camera
-systemctl cat backyard-camera | grep ExecStart
 sudo journalctl -u backyard-camera -n 40 --no-pager
 ```
 
-The last `ExecStart` line printed must run `watch.py`.
+The last `ExecStart` line from `systemctl cat backyard-camera` must run `watch.py`.
 
 For scheduled-only fallback, install `device/scheduled-only.conf` as `/etc/systemd/system/backyard-camera.service.d/scheduled-only.conf`, then reload/restart ([HARDWARE.md section 6](HARDWARE.md#6-scheduled-only-fallback)). Delete that file and reload/restart to return to motion mode. Updated `camera.py` reads both old and new queues. Do not roll back to an old copy of that file after the queue has gained motion columns.
 
