@@ -28,11 +28,11 @@ sudo apt update
 sudo apt install -y python3-picamera2 python3-numpy
 ```
 
-Copy `device/camera.py`, `device/motion.py`, and `device/watch.py` from the repository to `/opt/backyard-camera/device/` (root-owned, mode 644). Picamera2 must come from Raspberry Pi OS apt packages; do not install the Mac OpenCV requirements on the Pi. It only needs NumPy and Picamera2.
+Copy `device/camera.py`, `device/daylight.py`, `device/motion.py`, and `device/watch.py` from the repository to `/opt/backyard-camera/device/` (root-owned, mode 644). Picamera2 must come from Raspberry Pi OS apt packages; do not install the Mac OpenCV requirements on the Pi. It only needs NumPy and Picamera2.
 
 The existing device config continues to work with defaults. Optionally copy the `motion` section from `config.example.json` into `/etc/backyard-camera.json`, retaining your own credentials and absolute `queue_dir`.
 
-First test in the foreground (Ctrl-C to stop):
+First test in the foreground during London daylight (Ctrl-C to stop):
 
 ```sh
 sudo -u backyard /usr/bin/python3 /opt/backyard-camera/device/watch.py --config /etc/backyard-camera.json --offline

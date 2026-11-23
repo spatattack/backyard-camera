@@ -5,6 +5,7 @@
   "password": "REPLACE_WITH_DEVICE_ONLY_PASSWORD",
   "queue_dir": "./queue",
   "interval_seconds": 300,
+  "daylight_margin_minutes": 0,
   "max_queue_bytes": 2147483648,
   "min_free_bytes": 268435456,
   "motion": {

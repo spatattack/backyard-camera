@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import random
 import shutil
+import signal
 import sqlite3
 import subprocess
 import threading
@@ -19,8 +20,27 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from daylight import Daylight
+
 LOG = logging.getLogger("backyard")
 MAX_IMAGE = 8 * 1024 * 1024
+MIN_CAPTURE_TIME = dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc)
+
+
+def utc_now():
+    return dt.datetime.now(dt.timezone.utc)
+
+
+class PermanentUploadError(ValueError):
+    pass
+
+
+def error_code(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return f"http_{error.code}"
+    if isinstance(error, PermanentUploadError):
+        return str(error)
+    return type(error).__name__
 
 
 class Queue:
@@ -35,7 +55,21 @@ class Queue:
         for name, definition in (("trigger", "text not null default 'scheduled'"), ("event_id", "text"), ("motion_score", "real")):
             if name not in columns:
                 self.db.execute(f'alter table captures add column "{name}" {definition}')
+        self.db.execute("create table if not exists health (key text primary key, value text not null)")
+        self.db.execute("create table if not exists quarantine (id text primary key, failed_at text not null, code text not null)")
         self.db.commit()
+
+    def _health(self, key, value):
+        self.db.execute("insert into health values (?,?) on conflict(key) do update set value=excluded.value", (key, value))
+
+    def _error(self, operation, code, now):
+        self._health("last_error", json.dumps({"at": now, "operation": operation, "code": code}))
+
+    def error(self, operation, code):
+        with self.db:
+            self._error(operation, code, utc_now().isoformat())
+            if operation == "upload":
+                self._health("upload_attempt", "retrying")
 
     def add(self, data, captured_at, mock=False, trigger="scheduled", event_id=None, motion_score=None):
         if not data.startswith(b"\xff\xd8") or not data.endswith(b"\xff\xd9") or len(data) > MAX_IMAGE:
@@ -43,21 +77,59 @@ class Queue:
         identifier = str(uuid.uuid4())
         with self.db:
             self.db.execute("insert into captures values (?,?,?,?,?,?,?,?,?)", (identifier, captured_at, hashlib.sha256(data).hexdigest(), len(data), int(mock), data, trigger, event_id, motion_score))
+            self._health("last_capture_at", captured_at)
         return identifier
 
     def first(self):
-        row = self.db.execute("select * from captures order by captured_at,id limit 1").fetchone()
+        row = self.db.execute("select * from captures where id not in (select id from quarantine) order by captured_at,id limit 1").fetchone()
         return dict(zip(("id", "captured_at", "sha256", "bytes", "mock", "jpeg", "trigger", "event_id", "motion_score"), row)) if row else None
 
     def size(self):
         return self.db.execute("select coalesce(sum(bytes),0) from captures").fetchone()[0]
 
     def count(self):
-        return self.db.execute("select count(*) from captures").fetchone()[0]
+        return self.db.execute("select count(*) from captures where id not in (select id from quarantine)").fetchone()[0]
 
-    def remove(self, identifier):
+    def uploaded(self, identifier):
         with self.db:
             self.db.execute("delete from captures where id=?", (identifier,))
+            self._health("last_upload_at", utc_now().isoformat())
+            self._health("upload_attempt", "ok")
+
+    def quarantine(self, identifier, code):
+        now = utc_now().isoformat()
+        with self.db:
+            self.db.execute("insert into quarantine values (?,?,?)", (identifier, now, code))
+            self._error("upload", code, now)
+            self._health("upload_attempt", "quarantined")
+
+    def status(self):
+        health = dict(self.db.execute("select key,value from health"))
+        pending = self.count()
+        quarantined = self.db.execute("select count(*) from quarantine").fetchone()[0]
+        if health.get("upload_attempt") == "retrying":
+            upload_status = "retrying"
+        elif pending:
+            upload_status = "pending"
+        elif quarantined:
+            upload_status = "quarantined"
+        elif health.get("last_upload_at"):
+            upload_status = "ok"
+        else:
+            upload_status = "idle"
+        return {"pending": pending, "bytes": self.size(), "quarantined": quarantined,
+                "last_capture_at": health.get("last_capture_at"),
+                "last_upload_at": health.get("last_upload_at"),
+                "upload_status": upload_status,
+                "last_error": json.loads(health.get("last_error", "null"))}
+
+
+def http_error_json(error):
+    try:
+        payload = json.loads(error.read(8192))
+    except (ValueError, OSError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 class Cloud:
@@ -90,19 +162,35 @@ class Cloud:
         self.expires = time.time() + result.get("expires_in", 3600) - 60
 
     def upload(self, item):
+        jpeg = item["jpeg"]
+        if (len(jpeg) != item["bytes"] or len(jpeg) > MAX_IMAGE or
+                not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9") or
+                hashlib.sha256(jpeg).hexdigest() != item["sha256"]):
+            raise PermanentUploadError("invalid_queued_jpeg")
+        try:
+            captured_at = dt.datetime.fromisoformat(item["captured_at"].replace("Z", "+00:00"))
+        except ValueError:
+            raise PermanentUploadError("invalid_capture_timestamp") from None
+        if captured_at.tzinfo is None or captured_at < MIN_CAPTURE_TIME:
+            raise PermanentUploadError("invalid_capture_timestamp")
         self.login()
         path = f'{self.user_id}/{item["id"]}.jpg'
         # Immutable UUID path. A lost response is safe: verify existing bytes on conflict.
         try:
             self.request("/storage/v1/object/backyard-images/" + path, item["jpeg"], "POST", "image/jpeg")
         except urllib.error.HTTPError as error:
-            if error.code not in (400, 409):
+            duplicate = error.code == 409
+            if error.code == 400:
+                payload = http_error_json(error)
+                duplicate = (payload.get("error") == "Duplicate" or
+                             payload.get("code") in ("ResourceAlreadyExists", "KeyAlreadyExists"))
+            if not duplicate:
                 if error.code == 401:
                     self.expires = 0
                 raise
             existing = self.request("/storage/v1/object/authenticated/backyard-images/" + path, content_type="image/jpeg")
             if hashlib.sha256(existing).hexdigest() != item["sha256"]:
-                raise ValueError("Existing object differs; retaining queued capture") from error
+                raise PermanentUploadError("object_hash_conflict") from error
         metadata = {k: item[k] for k in ("id", "captured_at", "sha256", "bytes")}
         metadata.update(device_id=self.user_id, object_path=path, is_mock=bool(item["mock"]))
         metadata.update(trigger=item.get("trigger", "scheduled"), event_id=item.get("event_id"), motion_score=item.get("motion_score"))
@@ -112,13 +200,23 @@ class Cloud:
         except urllib.error.HTTPError as error:
             if error.code == 401:
                 self.expires = 0
+            if error.code == 400:
+                payload = http_error_json(error)
+                message = payload.get("message", "")
+                if (payload.get("code") == "23514" and isinstance(message, str) and
+                        any(f'"{constraint}"' in message for constraint in (
+                            "capture_event_shape", "captures_trigger_check", "captures_motion_score_check",
+                            "captures_sha256_check", "captures_bytes_check"))):
+                    raise PermanentUploadError("invalid_capture_metadata") from error
             if error.code != 409:
                 raise
             rows = self.request("/rest/v1/captures?id=eq." + item["id"] + "&select=*")
-            if not rows or any(rows[0].get(k) != v for k, v in metadata.items() if k != "captured_at"):
-                raise ValueError("Existing metadata differs; retaining queued capture") from error
-            if dt.datetime.fromisoformat(rows[0]["captured_at"].replace("Z", "+00:00")) != dt.datetime.fromisoformat(item["captured_at"]):
-                raise ValueError("Existing capture time differs") from error
+            if not rows:
+                raise
+            if any(rows[0].get(k) != v for k, v in metadata.items() if k != "captured_at"):
+                raise PermanentUploadError("metadata_conflict") from error
+            if dt.datetime.fromisoformat(rows[0]["captured_at"].replace("Z", "+00:00")) != captured_at:
+                raise PermanentUploadError("metadata_conflict") from error
 
 
 def drain(queue, cloud, limit=100):
@@ -126,16 +224,36 @@ def drain(queue, cloud, limit=100):
         item = queue.first()
         if item is None:
             return
-        cloud.upload(item)
-        queue.remove(item["id"])
+        try:
+            cloud.upload(item)
+        except PermanentUploadError as error:
+            code = error_code(error)
+            queue.quarantine(item["id"], code)
+            LOG.error("Quarantined %s (%s); image retained locally", item["id"], code)
+            continue
+        except Exception as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code == 401:
+                cloud.expires = 0
+            code = error_code(error)
+            queue.error("upload", code)
+            LOG.warning("Upload deferred (%s); queue retained", code)
+            raise
+        queue.uploaded(item["id"])
         LOG.info("Uploaded %s; pending=%s", item["id"], queue.count())
 
 
-def capture(queue, config, mock):
+def has_capacity(queue, config):
     if queue.size() + MAX_IMAGE > config.get("max_queue_bytes", 2 * 1024**3) or shutil.disk_usage(queue.root).free < config.get("min_free_bytes", 256 * 1024**2) + MAX_IMAGE:
+        queue.error("capture", "queue_limit")
         LOG.warning("Queue/disk limit reached: preserving queued images and skipping new capture")
+        return False
+    return True
+
+
+def capture(queue, config, mock):
+    if not has_capacity(queue, config):
         return
-    captured_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    captured_at = utc_now().isoformat()
     if mock:
         data = Path(mock).read_bytes()
     else:
@@ -149,22 +267,58 @@ def capture(queue, config, mock):
     LOG.info("Queued %s; pending=%s", identifier, queue.count())
 
 
+def capture_failed(queue, error):
+    code = error_code(error)
+    queue.error("capture", code)
+    LOG.error("Capture failed (%s); continuing", code)
+
+
+def configured_cloud(queue, config):
+    try:
+        return Cloud(config)
+    except (ValueError, KeyError):
+        queue.error("upload", "cloud_config")
+        LOG.error("Cloud configuration is invalid; queue retained")
+        raise ValueError("Invalid cloud configuration") from None
+
+
+def upload_pending(queue, config, limit=100):
+    try:
+        drain(queue, configured_cloud(queue, config), limit)
+    except Exception:
+        raise SystemExit(1) from None
+
+
 def worker(config, stop):
     queue = Queue(config["queue_dir"])
-    cloud = Cloud(config)
-    delay = 5
+    try:
+        cloud = None
+        delay = 5
+        while not stop.is_set():
+            try:
+                if cloud is None:
+                    cloud = configured_cloud(queue, config)
+                drain(queue, cloud)
+                delay = 5
+            except Exception:
+                delay = min(delay * 2, 300)
+            stop.wait(delay + random.uniform(0, 2))
+    finally:
+        queue.db.close()
+
+
+def run_scheduled(queue, config, mock, stop, interval, daylight):
+    deadline = time.monotonic()
     while not stop.is_set():
-        try:
-            drain(queue, cloud)
-            delay = 5
-        except Exception as error:
-            # Do not log auth responses, passwords, or bearer tokens.
-            if isinstance(error, urllib.error.HTTPError) and error.code == 401:
-                cloud.expires = 0
-            LOG.warning("Upload deferred (%s); queue retained", type(error).__name__)
-            delay = min(delay * 2, 300)
-        stop.wait(delay + random.uniform(0, 2))
-    queue.db.close()
+        if mock or daylight.allows(utc_now()):
+            try:
+                capture(queue, config, mock)
+            except Exception as error:
+                capture_failed(queue, error)
+        deadline += interval
+        if deadline < time.monotonic():
+            deadline = time.monotonic() + interval
+        stop.wait(max(0, deadline - time.monotonic()))
 
 
 def main():
@@ -182,45 +336,50 @@ def main():
     os.umask(0o077)
     config = json.loads(Path(args.config).read_text())
     config["queue_dir"] = str(Path(config.get("queue_dir", "queue")).resolve())
-    queue = Queue(config["queue_dir"])
     if args.status:
-        print(json.dumps({"pending": queue.count(), "bytes": queue.size()}))
+        queue = Queue(config["queue_dir"])
+        try:
+            print(json.dumps(queue.status()))
+        finally:
+            queue.db.close()
         return
-    lock = (queue.root / "camera.lock").open("w")
-    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    root = Path(config["queue_dir"])
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
     interval = float(config.get("interval_seconds", 300))
     if interval < 1:
         raise ValueError("interval_seconds must be at least 1")
-    if args.upload_only:
-        drain(queue, Cloud(config), limit=1000000)
-        return
-    if args.once:
-        capture(queue, config, args.mock)
-        if not args.offline:
-            drain(queue, Cloud(config))
-        return
-    stop = threading.Event()
-    uploader = None
-    if not args.offline:
-        uploader = threading.Thread(target=worker, args=(config, stop), daemon=True)
-        uploader.start()
-    try:
-        deadline = time.monotonic()
-        while True:
+    with (root / "camera.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        queue = Queue(root)
+        try:
+            if args.upload_only:
+                upload_pending(queue, config, limit=1000000)
+                return
+            if args.once:
+                try:
+                    capture(queue, config, args.mock)
+                except Exception as error:
+                    capture_failed(queue, error)
+                    raise SystemExit(1) from None
+                if not args.offline:
+                    upload_pending(queue, config)
+                return
+            daylight = None if args.mock else Daylight(config)
+            stop = threading.Event()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                signal.signal(sig, lambda *_: stop.set())
+            uploader = None
+            if not args.offline:
+                uploader = threading.Thread(target=worker, args=(config, stop), daemon=True)
+                uploader.start()
             try:
-                capture(queue, config, args.mock)
-            except Exception as error:
-                LOG.error("Capture failed (%s); retry at next interval", type(error).__name__)
-            deadline += interval
-            if deadline < time.monotonic():
-                deadline = time.monotonic() + interval
-            time.sleep(max(0, deadline - time.monotonic()))
-    except KeyboardInterrupt:
-        stop.set()
-        if uploader:
-            uploader.join(timeout=35)
-    finally:
-        queue.db.close()
+                run_scheduled(queue, config, args.mock, stop, interval, daylight)
+            finally:
+                stop.set()
+                if uploader:
+                    uploader.join(timeout=35)
+        finally:
+            queue.db.close()
 
 
 if __name__ == "__main__":

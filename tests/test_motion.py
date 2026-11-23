@@ -1,4 +1,5 @@
 import json
+from unittest.mock import Mock
 from pathlib import Path
 import sqlite3
 import sys
@@ -65,5 +66,28 @@ class MotionTests(unittest.TestCase):
             self.assertEqual(sum(r[0]=='motion' for r in rows),3)
             self.assertEqual(len({r[1] for r in rows if r[1]}),1)
             self.assertTrue(all(r[2] for r in rows))
+
+    def test_motion_resumes_after_dark_and_after_capture_failures(self):
+        with tempfile.TemporaryDirectory() as root:
+            pixels = np.zeros((4, 4))
+            stop = Mock()
+            stop.is_set.return_value = False
+            daylight = Mock()
+            daylight.allows.side_effect = [False, True, True, True, True, True, True]
+            source = Mock()
+            source.read.side_effect = [OSError('camera temporarily unavailable'), (0, pixels, 0),
+                                       (2, pixels, 1), None]
+            source.jpeg.side_effect = [ValueError('private encoding detail'), b'\xff\xd8ok\xff\xd9']
+            config = {'queue_dir': root, 'motion': {'warmup_seconds': 0}, 'interval_seconds': 2}
+            self.assertEqual(run(source, config, stop, daylight=daylight), 1)
+            self.assertEqual([call.args for call in stop.wait.call_args_list], [(30,), (1,)])
+            self.assertEqual([call.args for call in source.release.call_args_list], [(0,), (1,)])
+            source.close.assert_called_once()
+            q = Queue(root)
+            try:
+                self.assertEqual(q.status()['last_error']['code'], 'ValueError')
+                self.assertEqual(q.count(), 1)
+            finally:
+                q.db.close()
 
 if __name__=='__main__': unittest.main()

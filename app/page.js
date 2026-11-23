@@ -1,4 +1,6 @@
 import {getArchive, validDate} from '../lib/archive';
+import {isLatestArchive} from '../lib/archive-refresh';
+import ArchiveRefresh from './archive-refresh';
 export const dynamic = 'force-dynamic';
 const display = value => new Intl.DateTimeFormat('en-GB', {dateStyle:'long', timeZone:'UTC'}).format(new Date(value));
 export default async function Page({searchParams}) {
@@ -9,6 +11,7 @@ export default async function Page({searchParams}) {
   const days = Object.groupBy(captures, c => c.captured_at.slice(0,10));
   const pageUrl = n => `/?${new URLSearchParams({...date && {date}, page: String(n)})}`;
   return <main>
+    {status !== 'unconfigured' && isLatestArchive(params.date, page) && <ArchiveRefresh/>}
     <header><a className="brand" href="/">BACKYARD CAMERA</a><span className="edition">FIELD NOTES / 001</span></header>
     <section className="intro"><p className="eyebrow">FIVE-MINUTE STUDIES & MOMENTS IN BETWEEN</p><h1>A place,<br/><em>over time.</em></h1><p className="description">The light shifts. The weather passes. A small camera stays still, making a photographic record of the everyday.</p></section>
     <section aria-label="Photo archive">
