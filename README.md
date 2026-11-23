@@ -24,6 +24,8 @@ Open http://localhost:3000. Without cloud configuration the site shows a setup n
 
 Motion-triggered bursts, ignored regions, a cooldown and video replay are now available. See [Motion setup and testing](docs/MOTION.md). Scheduled-only mode remains available.
 
+The optional [cloud labeller](docs/LABELLING.md) adds wildlife and object labels and hides likely false motion triggers from the archive without adding work to the Pi.
+
 ## Connect the cloud
 
 Follow [Cloud setup](docs/CLOUD.md), then [Hardware bring-up](docs/HARDWARE.md) for systemd installation, device config, status checks, and reboot/Wi-Fi acceptance. See [current audit and future backlog](docs/BACKLOG.md) for the cloud blocker and [previous delivery status](docs/STATUS.md) for historical verification.
@@ -51,7 +53,7 @@ The first command drains any queued offline captures; the second adds and upload
 4. Only after both operations succeed is the local item removed. UUID paths and duplicate verification make lost-response retries safe.
 5. The Next.js server uses a publishable key to read metadata. The public JPEG bucket supplies images. Dates and pagination use UTC; uploads appear without a deploy, including clearly labelled mock captures. The latest unfiltered archive refreshes every minute while its tab is visible.
 
-The device can insert into its own folder only if its database registration is enabled. It cannot update/delete objects or metadata, register other devices, or read private account data. Public images and capture metadata are intentionally readable by anyone. Place the camera accordingly before starting real capture.
+The device can insert into its own folder only if its database registration is enabled. It cannot update/delete objects or metadata, register other devices, or read private account data. Visible capture metadata and direct image URLs are intentionally public. Place the camera accordingly before starting real capture.
 
 ## Limits and operations
 
@@ -66,6 +68,7 @@ The device can insert into its own folder only if its database registration is e
 ## Repository layout
 
 - `device/`: standard-library Python capture/uploader, sample config, mock JPEG, systemd unit.
+- `cloud/`: optional CPU labeller run by GitHub Actions.
 - `supabase/migrations/`: additive, one-time database and Storage policies.
 - `app/`, `lib/`: Next.js archive.
 - `tests/`: queue/retry tests, RLS tests on a local PostgreSQL engine, archive tests.

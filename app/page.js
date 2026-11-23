@@ -1,4 +1,4 @@
-import {getArchive, validDate} from '../lib/archive';
+import {formatCaptureLabel, getArchive, validDate} from '../lib/archive';
 import {isLatestArchive} from '../lib/archive-refresh';
 import ArchiveRefresh from './archive-refresh';
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,7 @@ export default async function Page({searchParams}) {
       {status === 'unconfigured' && <div className="empty"><span className="frame">＋</span><h3>Waiting for the first photograph.</h3><p>The archive is ready to connect. Cloud setup is still in progress.</p></div>}
       {status === 'error' && <div className="empty" role="alert"><h3>The archive is temporarily unavailable.</h3><p>Please try again shortly.</p><a href="/">Try again</a></div>}
       {status === 'ready' && !captures.length && <div className="empty"><h3>No photographs {date ? 'on this day' : 'yet'}.</h3><p>New captures will appear here after upload.</p></div>}
-      {Object.entries(days).map(([day, images]) => <section className="day" key={day}><h3>{display(day)}</h3><div className="grid">{images.map((c, i) => <figure key={c.id} title={c.event_id ? `Motion event ${c.event_id}` : undefined}><a href={c.url} target="_blank" rel="noreferrer"><img src={c.url} alt={`Fixed backyard view, ${display(c.captured_at)} at ${c.captured_at.slice(11,16)} UTC${c.is_mock ? ' — mock capture' : ''}`} loading={i === 0 ? 'eager' : 'lazy'}/></a><figcaption><time dateTime={c.captured_at}>{c.captured_at.slice(11,16)} UTC</time><span>{`${c.is_mock ? 'MOCK · ' : ''}${c.trigger === 'motion' ? 'MOTION BURST' : 'FIVE-MINUTE STUDY'}`}</span></figcaption></figure>)}</div></section>)}
+      {Object.entries(days).map(([day, images]) => <section className="day" key={day}><h3>{display(day)}</h3><div className="grid">{images.map((c, i) => <figure key={c.id} title={c.event_id ? `Motion event ${c.event_id}` : undefined}><a href={c.url} target="_blank" rel="noreferrer"><img src={c.url} alt={`Fixed backyard view, ${display(c.captured_at)} at ${c.captured_at.slice(11,16)} UTC${c.is_mock ? ' — mock capture' : ''}`} loading={i === 0 ? 'eager' : 'lazy'}/></a><figcaption><time dateTime={c.captured_at}>{c.captured_at.slice(11,16)} UTC</time><span>{[c.is_mock && 'MOCK', c.trigger === 'motion' ? 'MOTION BURST' : 'FIVE-MINUTE STUDY', formatCaptureLabel(c)].filter(Boolean).join(' · ')}</span></figcaption></figure>)}</div></section>)}
       <nav className="pagination" aria-label="Archive pages">{page > 0 && <a href={pageUrl(page-1)}>← Newer</a>}{hasMore && <a href={pageUrl(page+1)}>Older →</a>}</nav>
     </section>
     <footer><span>One camera. One view. Always changing.</span><span>Scheduled & motion captures · Times in UTC</span></footer>
