@@ -1,5 +1,5 @@
 [Unit]
-Description=Backyard Camera capture and offline uploader
+Description=Backyard Camera motion + scheduled capture and offline uploader
 After=network.target time-sync.target
 
 [Service]
@@ -8,7 +8,7 @@ User=backyard
 Group=backyard
 SupplementaryGroups=video render
 WorkingDirectory=/var/lib/backyard-camera
-ExecStart=/usr/bin/python3 /opt/backyard-camera/device/camera.py --config /etc/backyard-camera.json
+ExecStart=/usr/bin/python3 /opt/backyard-camera/device/watch.py --config /etc/backyard-camera.json
 Restart=on-failure
 RestartSec=10
 UMask=0077
